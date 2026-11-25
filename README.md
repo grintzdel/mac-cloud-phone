@@ -26,20 +26,55 @@ speakers while the tap is running.
 
 ## Requirements
 
-- Apple Silicon Mac, macOS 14.2 or later
-- BlueStacks Air with **Settings → Advanced → Android Debug Bridge** enabled (listens on `127.0.0.1:5555`)
-- `brew install scrcpy` (the bridge checks that `scrcpy-server` is exactly 5.0.1 by SHA-256)
-- Go 1.24, Xcode command line tools
+Everything below is free.
 
-## Build
+- Apple Silicon Mac, macOS 14.2 or later
+- [BlueStacks Air](https://www.bluestacks.com/mac) with **Settings → Advanced → Android Debug Bridge** enabled
+  (listens on `127.0.0.1:5555`)
+- `brew install scrcpy` (the bridge checks that `scrcpy-server` is exactly 5.0.1 by SHA-256)
+- Go 1.24, Xcode command line tools, TypeScript (`tsc`) only if you change the page
+- [Tailscale](https://tailscale.com) on the Mac and the iPhone, signed in to the same account
+
+## Setup
+
+1. Install BlueStacks Air, sign in to Google, install the game from the Play Store and let it download its data.
+2. In BlueStacks, enable **Settings → Advanced → Android Debug Bridge**. Leave remote ADB access off.
+3. Start Tailscale on the Mac and on the iPhone.
+4. Optionally `cp config.env.example config.env` and adjust it.
+5. Run `scripts/start.sh`. The first time, macOS asks to let **CloudPhoneAudio** record audio: accept. Rebuilding the
+   helper changes its ad-hoc signature, so macOS may ask again.
+
+### On the iPhone
+
+1. Paste the URL that `start.sh` copied to the clipboard (Universal Clipboard) into Safari.
+2. For a real full screen, use **Share → Add to Home Screen** with **Open as Web App** on, and launch the game from that
+   icon: no Safari bars, in portrait or landscape. The web app has its own storage, so it asks for the token once
+   (`pbcopy < ~/.config/cloudphone/token` on the Mac).
+3. Turn the orientation lock off and rotate the phone when the game switches to landscape.
+4. Tap **« Toucher pour activer le son »**: Safari requires a gesture before playing audio.
+
+## Security
+
+- The bridge listens on `127.0.0.1` and the Tailscale addresses only, and requires the bearer token stored in
+  `~/.config/cloudphone/token` (mode 600).
+- BlueStacks' ADB port 5555 listens on **all interfaces**, regardless of its "remote access" setting: anyone on the
+  local network can get a shell on the Android instance. Turn the macOS firewall on (**System Settings → Network →
+  Firewall**).
+
+## Limitations
+
+- One client at a time; no gamepad.
+- If the bridge crashes (rather than being stopped with `stop.sh`), BlueStacks plays the game sound on the Mac again.
+- `caffeinate` prevents idle sleep only; closing the lid still sleeps the Mac.
+- Windows protected with `FLAG_SECURE` (some purchase or login screens) are captured as black.
+
+## Build by hand
 
 ```bash
 scripts/build-audiotap.sh
+tsc -p web
 go build -o build/bridge ./cmd/bridge
 ```
-
-The first audio capture triggers a macOS permission prompt for **CloudPhoneAudio**. Rebuilding the helper changes its
-ad-hoc signature, so macOS may ask again.
 
 ## Daily use
 
@@ -63,15 +98,13 @@ BlueStacks audio process disappears, so a BlueStacks restart is picked up too.
 ## Streaming (phase 2)
 
 ```bash
-tsc -p web
-go build -o build/bridge ./cmd/bridge
 build/bridge serve
 ```
 
 The bridge listens on `127.0.0.1:8080` and on the Mac's Tailscale addresses only (never on the LAN), and its ICE
 candidates are restricted to loopback and Tailscale ranges. On the iPhone, with Tailscale connected, open
 `http://<mac tailscale ip>:8080/#token=<token>`; the token lives in `~/.config/cloudphone/token` (mode 600) and the page
-keeps it in local storage. Add `?stats` or double-tap the video for fps, jitter buffer and RTT.
+keeps it in local storage. Add `?stats` to the URL for fps, jitter buffer and RTT.
 
 - One client at a time: a new connection replaces the previous one.
 - On connection and on PLI/FIR, the bridge sends scrcpy's `RESET_VIDEO` control message (type 17) to get a key frame
