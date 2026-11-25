@@ -10,7 +10,7 @@ Play an Android game running in BlueStacks Air on the Mac from an iPhone, withou
 | 1. Raw capture from Go | Done: `bridge capture` writes `video.h264` and `audio.opus` |
 | 2. WebRTC streaming | Done: `bridge serve` streams H.264 + Opus to Safari over Tailscale |
 | 3. Touch control | Done: multi-touch from Safari over a WebRTC DataChannel |
-| 4. Comfort (scripts, reconnection, config) | Not started |
+| 4. Comfort | Done: `start.sh` / `stop.sh`, `config.env`, automatic restarts, caffeinate (gamepad not done) |
 
 ## Architecture
 
@@ -40,6 +40,25 @@ go build -o build/bridge ./cmd/bridge
 
 The first audio capture triggers a macOS permission prompt for **CloudPhoneAudio**. Rebuilding the helper changes its
 ad-hoc signature, so macOS may ask again.
+
+## Daily use
+
+```bash
+scripts/start.sh
+scripts/stop.sh
+```
+
+`start.sh` builds what is missing, launches BlueStacks hidden if needed, waits for Android, starts the bridge in the
+background (`logs/bridge.log`, pid in `run/bridge.pid`), keeps the Mac from idle-sleeping with `caffeinate` while the
+bridge runs, and copies the iPhone URL with its token to the clipboard. It raises the Android media volume only once
+the audio tap is active, and `stop.sh` lowers it before stopping the bridge, so the Mac never plays the game sound.
+
+Settings live in `config.env` (copy `config.env.example`): resolution cap, bit rates, fps, port, volumes, whether to hide
+or quit BlueStacks.
+
+The bridge restarts the scrcpy server and the audio helper on its own (1 s, 2 s, 5 s, then every 10 s), without
+dropping the iPhone connection; the page reconnects by itself if the bridge restarts. The audio helper exits when the
+BlueStacks audio process disappears, so a BlueStacks restart is picked up too.
 
 ## Streaming (phase 2)
 

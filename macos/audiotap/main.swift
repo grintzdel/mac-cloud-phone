@@ -197,6 +197,17 @@ check(AudioDeviceCreateIOProcIDWithBlock(&procID, deviceID, queue) { _, inputDat
 check(AudioDeviceStart(deviceID, procID), "start device")
 log("streaming Opus at \(args.bitRate) bit/s")
 
+let watchdog = DispatchSource.makeTimerSource(queue: .main)
+watchdog.schedule(deadline: .now() + 2, repeating: 2)
+watchdog.setEventHandler {
+    let alive = Set(processObjects())
+    if !targets.allSatisfy(alive.contains) {
+        log("\(args.bundleID) audio process is gone, exiting so the bridge can retap")
+        exit(3)
+    }
+}
+watchdog.resume()
+
 for sig in [SIGTERM, SIGINT] {
     signal(sig, SIG_IGN)
     let source = DispatchSource.makeSignalSource(signal: sig, queue: .main)

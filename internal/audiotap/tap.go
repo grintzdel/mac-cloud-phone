@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -26,6 +27,8 @@ type Tap struct {
 	listener net.Listener
 	dir      string
 	logPath  string
+	once     sync.Once
+	closeErr error
 }
 
 func Start(ctx context.Context, opts Options, logger *slog.Logger) (*Tap, error) {
@@ -77,6 +80,11 @@ func (t *Tap) ReadPacket() (Packet, error) {
 }
 
 func (t *Tap) Close() error {
+	t.once.Do(func() { t.closeErr = t.close() })
+	return t.closeErr
+}
+
+func (t *Tap) close() error {
 	var errs []error
 	if t.conn != nil {
 		errs = append(errs, t.conn.Close())

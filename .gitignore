@@ -4,3 +4,5 @@
 *.m4a
 *.h264
 *.opus
+/run/
+/config.env

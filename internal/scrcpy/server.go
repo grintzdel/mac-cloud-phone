@@ -76,6 +76,8 @@ type Server struct {
 	port      int
 	logger    *slog.Logger
 	controlMu sync.Mutex
+	closeOnce sync.Once
+	closeErr  error
 }
 
 func Start(ctx context.Context, client adb.Client, opts Options, logger *slog.Logger) (*Server, error) {
@@ -169,6 +171,11 @@ func (s *Server) logOutput(r io.Reader) {
 }
 
 func (s *Server) Close() error {
+	s.closeOnce.Do(func() { s.closeErr = s.close() })
+	return s.closeErr
+}
+
+func (s *Server) close() error {
 	var errs []error
 	for _, c := range []net.Conn{s.Video, s.Control} {
 		if c != nil {
