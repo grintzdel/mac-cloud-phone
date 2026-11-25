@@ -30,6 +30,7 @@ type Streamer struct {
 	logger *slog.Logger
 
 	requestKeyFrame func()
+	onControl       func([]byte)
 	lastKeyRequest  time.Time
 	keyMu           sync.Mutex
 
@@ -40,7 +41,7 @@ type Streamer struct {
 	packetizer *videoPacketizer
 }
 
-func NewStreamer(requestKeyFrame func(), logger *slog.Logger) (*Streamer, error) {
+func NewStreamer(requestKeyFrame func(), onControl func([]byte), logger *slog.Logger) (*Streamer, error) {
 	m := &webrtc.MediaEngine{}
 	if err := m.RegisterDefaultCodecs(); err != nil {
 		return nil, err
@@ -75,6 +76,7 @@ func NewStreamer(requestKeyFrame func(), logger *slog.Logger) (*Streamer, error)
 		audio:           audio,
 		logger:          logger,
 		requestKeyFrame: requestKeyFrame,
+		onControl:       onControl,
 		packetizer:      newVideoPacketizer(rtpMTU),
 	}, nil
 }
@@ -96,6 +98,13 @@ func (s *Streamer) Answer(ctx context.Context, offer webrtc.SessionDescription) 
 		}
 		go s.readRTCP(sender)
 	}
+	pc.OnDataChannel(func(dc *webrtc.DataChannel) {
+		if dc.Label() != "control" {
+			_ = dc.Close()
+			return
+		}
+		dc.OnMessage(func(msg webrtc.DataChannelMessage) { s.onControl(msg.Data) })
+	})
 	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
 		s.logger.Info("peer connection state", "state", state.String())
 		if state == webrtc.PeerConnectionStateConnected {

@@ -12,6 +12,7 @@ import (
 
 	"cloudphone/internal/adb"
 	"cloudphone/internal/audiotap"
+	"cloudphone/internal/control"
 	"cloudphone/internal/scrcpy"
 	"cloudphone/internal/signaling"
 	"cloudphone/internal/webrtc"
@@ -33,9 +34,19 @@ func serve(ctx context.Context, cfg config, logger *slog.Logger) error {
 	}
 	defer server.Close()
 
+	var size scrcpy.VideoSize
 	streamer, err := webrtc.NewStreamer(func() {
 		if err := server.ResetVideo(); err != nil {
 			logger.Warn("key frame request failed", "err", err)
+		}
+	}, func(msg []byte) {
+		event, err := control.Decode(msg, &size)
+		if err != nil {
+			logger.Debug("control message ignored", "err", err)
+			return
+		}
+		if err := server.InjectTouch(event); err != nil {
+			logger.Warn("touch injection failed", "err", err)
 		}
 	}, logger)
 	if err != nil {
@@ -45,7 +56,7 @@ func serve(ctx context.Context, cfg config, logger *slog.Logger) error {
 
 	ctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
-	go func() { cancel(pumpVideo(server, streamer)) }()
+	go func() { cancel(pumpVideo(server, streamer, &size, logger)) }()
 
 	if !cfg.noAudio {
 		tap, err := audiotap.Start(ctx, audiotap.Options{
@@ -102,13 +113,15 @@ func listenAddrs(port int, logger *slog.Logger) []string {
 	return addrs
 }
 
-func pumpVideo(server *scrcpy.Server, streamer *webrtc.Streamer) error {
+func pumpVideo(server *scrcpy.Server, streamer *webrtc.Streamer, size *scrcpy.VideoSize, logger *slog.Logger) error {
 	for {
 		packet, err := scrcpy.ReadPacket(server.Video)
 		if err != nil {
 			return fmt.Errorf("video stream ended: %w", err)
 		}
-		if packet.Frame == nil {
+		if packet.Session != nil {
+			size.Set(uint16(packet.Session.Width), uint16(packet.Session.Height))
+			logger.Info("video size", "width", packet.Session.Width, "height", packet.Session.Height)
 			continue
 		}
 		if err := streamer.WriteVideo(packet.Frame); err != nil {

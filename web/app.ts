@@ -10,7 +10,11 @@ const statusLine = document.getElementById("status") as HTMLDivElement;
 const startButton = document.getElementById("start") as HTMLButtonElement;
 const statsBox = document.getElementById("stats") as HTMLDivElement;
 
+const MAX_POINTERS = 10;
+
 let pc: RTCPeerConnection | null = null;
+let controlChannel: RTCDataChannel | null = null;
+const pointerSlots = new Map<number, number>();
 let retry = 0;
 let retryTimer: number | undefined;
 
@@ -87,6 +91,7 @@ async function connect(): Promise<void> {
   pc?.close();
   const conn = new RTCPeerConnection();
   pc = conn;
+  controlChannel = conn.createDataChannel("control", { ordered: true });
   conn.addTransceiver("video", { direction: "recvonly" });
   conn.addTransceiver("audio", { direction: "recvonly" });
 
@@ -153,8 +158,61 @@ startButton.addEventListener("click", () => {
   hideOverlay();
 });
 
-video.addEventListener("dblclick", () => {
-  statsBox.hidden = !statsBox.hidden;
+type TouchAction = "down" | "move" | "up" | "cancel";
+
+function normalized(event: PointerEvent): { x: number; y: number } | null {
+  if (!video.videoWidth || !video.videoHeight) return null;
+  const rect = video.getBoundingClientRect();
+  const scale = Math.min(rect.width / video.videoWidth, rect.height / video.videoHeight);
+  const width = video.videoWidth * scale;
+  const height = video.videoHeight * scale;
+  const x = (event.clientX - rect.left - (rect.width - width) / 2) / width;
+  const y = (event.clientY - rect.top - (rect.height - height) / 2) / height;
+  return { x, y };
+}
+
+function freeSlot(): number | null {
+  const used = new Set(pointerSlots.values());
+  for (let slot = 0; slot < MAX_POINTERS; slot++) if (!used.has(slot)) return slot;
+  return null;
+}
+
+function sendTouch(action: TouchAction, slot: number, x: number, y: number): void {
+  if (controlChannel?.readyState !== "open") return;
+  controlChannel.send(JSON.stringify({ t: "touch", a: action, id: slot, x, y }));
+}
+
+function onPointer(action: TouchAction, event: PointerEvent): void {
+  event.preventDefault();
+  const pos = normalized(event);
+  if (!pos) return;
+  let slot = pointerSlots.get(event.pointerId);
+  if (action === "down") {
+    if (slot !== undefined || pos.x < 0 || pos.x > 1 || pos.y < 0 || pos.y > 1) return;
+    const free = freeSlot();
+    if (free === null) return;
+    slot = free;
+    pointerSlots.set(event.pointerId, slot);
+    video.setPointerCapture(event.pointerId);
+  }
+  if (slot === undefined) return;
+  sendTouch(action, slot, pos.x, pos.y);
+  if (action === "up" || action === "cancel") pointerSlots.delete(event.pointerId);
+}
+
+function cancelAllPointers(): void {
+  for (const slot of pointerSlots.values()) sendTouch("cancel", slot, 0, 0);
+  pointerSlots.clear();
+}
+
+video.addEventListener("pointerdown", (e) => onPointer("down", e));
+video.addEventListener("pointermove", (e) => onPointer("move", e));
+video.addEventListener("pointerup", (e) => onPointer("up", e));
+video.addEventListener("pointercancel", (e) => onPointer("cancel", e));
+video.addEventListener("contextmenu", (e) => e.preventDefault());
+document.addEventListener("gesturestart", (e) => e.preventDefault());
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) cancelAllPointers();
 });
 
 if (new URLSearchParams(location.search).has("stats")) statsBox.hidden = false;

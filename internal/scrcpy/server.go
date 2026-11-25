@@ -47,6 +47,7 @@ func (o Options) serverCommand(scid uint32) []string {
 		"audio=false",
 		"control=" + strconv.FormatBool(o.Control),
 		"video_codec=h264",
+		"clipboard_autosync=false",
 		"cleanup=true",
 	}
 	for _, opt := range []struct {
@@ -125,6 +126,7 @@ func (s *Server) connect(ctx context.Context, control bool) error {
 		if s.Control, err = net.Dial("tcp", "127.0.0.1:"+strconv.Itoa(s.port)); err != nil {
 			return fmt.Errorf("scrcpy: connect control socket: %w", err)
 		}
+		go func() { _, _ = io.Copy(io.Discard, s.Control) }()
 	}
 	if s.DeviceName, err = ReadDeviceMeta(video); err != nil {
 		return err
