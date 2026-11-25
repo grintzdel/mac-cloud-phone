@@ -1,0 +1,6 @@
+/logs/
+/out/
+/build/
+*.m4a
+*.h264
+*.opus

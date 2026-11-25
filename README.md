@@ -1,0 +1,66 @@
+# Mac Cloud Phone
+
+Play an Android game running in BlueStacks Air on the Mac from an iPhone, without disturbing whoever uses the Mac.
+
+## Status
+
+| Phase | State |
+|---|---|
+| 0. Feasibility | Done: BlueStacks Air (Android 13) runs Love and Deepspace, scrcpy captures video, a Core Audio process tap captures and mutes the audio |
+| 1. Raw capture from Go | Done: `bridge capture` writes `video.h264` and `audio.opus` |
+| 2. WebRTC streaming | Not started |
+| 3. Touch control | Not started |
+| 4. Comfort (scripts, reconnection, config) | Not started |
+
+## Architecture
+
+```
+BlueStacks Air ──adb──▶ scrcpy-server 5.0.1 ──H.264──▶ bridge (Go) ──WebRTC──▶ Safari (iPhone)
+       │                                                  ▲
+       └── audio ──▶ CloudPhoneAudio.app (Core Audio tap, Opus) ──unix socket──┘
+```
+
+scrcpy's own audio capture is refused inside BlueStacks (`AudioRecord` and `registerAudioPolicy` both fail), so the
+audio is captured on the Mac side. The tap is created with `muteBehavior = .muted`: BlueStacks stays silent on the Mac
+speakers while the tap is running.
+
+## Requirements
+
+- Apple Silicon Mac, macOS 14.2 or later
+- BlueStacks Air with **Settings → Advanced → Android Debug Bridge** enabled (listens on `127.0.0.1:5555`)
+- `brew install scrcpy` (the bridge checks that `scrcpy-server` is exactly 5.0.1 by SHA-256)
+- Go 1.24, Xcode command line tools
+
+## Build
+
+```bash
+scripts/build-audiotap.sh
+go build -o build/bridge ./cmd/bridge
+```
+
+The first audio capture triggers a macOS permission prompt for **CloudPhoneAudio**. Rebuilding the helper changes its
+ad-hoc signature, so macOS may ask again.
+
+## Raw capture (phase 1)
+
+```bash
+build/bridge capture -duration 15s -out out
+ffplay out/video.h264
+ffplay out/audio.opus
+```
+
+Useful flags: `-serial`, `-max-size`, `-video-bit-rate`, `-max-fps`, `-no-audio`, `-log-level debug`.
+
+Keep the Android media volume at its maximum: the tap captures what BlueStacks outputs, and mutes it on the Mac.
+
+## Protocol notes (scrcpy 5.0.1, checked in the server source)
+
+- Server launched with `CLASSPATH=/data/local/tmp/scrcpy-server.jar app_process / com.genymobile.scrcpy.Server 5.0.1 key=value…`;
+  the first argument must equal the server version.
+- `tunnel_forward=true`: the server listens on `localabstract:scrcpy_<scid as %08x>`, reached through `adb forward`.
+  It writes one dummy byte on the first socket, then a 64-byte NUL-padded device name.
+- Video stream: 4-byte big-endian codec id (`0` = disabled, `1` = configuration error), then 12-byte headers.
+  If bit 63 is set, the header is a session: `u32 flags | u32 width | u32 height` (flag bit 0 = client resize).
+  Otherwise it is `u64 pts_and_flags | u32 size` followed by the payload, with bit 62 = config packet and bit 61 = key
+  frame. Unlike scrcpy 2.x, the width and height are no longer in the codec header.
+- The audio helper uses the same `u64 pts (µs) | u32 size | payload` framing for 20 ms Opus packets.
