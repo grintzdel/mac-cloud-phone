@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"sync"
 	"time"
 
 	"cloudphone/internal/adb"
@@ -69,10 +70,11 @@ type Server struct {
 	Video      net.Conn
 	Control    net.Conn
 
-	adb    adb.Client
-	cmd    *exec.Cmd
-	port   int
-	logger *slog.Logger
+	adb       adb.Client
+	cmd       *exec.Cmd
+	port      int
+	logger    *slog.Logger
+	controlMu sync.Mutex
 }
 
 func Start(ctx context.Context, client adb.Client, opts Options, logger *slog.Logger) (*Server, error) {

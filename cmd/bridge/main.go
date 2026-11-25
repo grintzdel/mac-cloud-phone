@@ -36,27 +36,32 @@ type config struct {
 	outDir       string
 	duration     time.Duration
 	noAudio      bool
+	port         int
+	tokenFile    string
 }
 
 func main() {
-	if len(os.Args) < 2 || os.Args[1] != "capture" {
-		fmt.Fprintln(os.Stderr, "usage: bridge capture [flags]")
+	commands := map[string]func(context.Context, config, *slog.Logger) error{"capture": capture, "serve": serve}
+	if len(os.Args) < 2 || commands[os.Args[1]] == nil {
+		fmt.Fprintln(os.Stderr, "usage: bridge capture|serve [flags]")
 		os.Exit(2)
 	}
-	cfg := parseFlags(os.Args[2:])
+	name := os.Args[1]
+	cfg := parseFlags(name, os.Args[2:])
 	logger := newLogger(cfg.logLevel)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := capture(ctx, cfg, logger); err != nil {
-		logger.Error("capture failed", "err", err)
+	if err := commands[name](ctx, cfg, logger); err != nil {
+		logger.Error(name+" failed", "err", err)
 		os.Exit(1)
 	}
 }
 
-func parseFlags(args []string) config {
+func parseFlags(name string, args []string) config {
 	var cfg config
-	fs := flag.NewFlagSet("capture", flag.ExitOnError)
+	home, _ := os.UserHomeDir()
+	fs := flag.NewFlagSet(name, flag.ExitOnError)
 	fs.StringVar(&cfg.logLevel, "log-level", "info", "debug, info, warn or error")
 	fs.StringVar(&cfg.adbPath, "adb", "adb", "adb executable")
 	fs.StringVar(&cfg.serial, "serial", "127.0.0.1:5555", "adb serial of the Android device")
@@ -69,7 +74,9 @@ func parseFlags(args []string) config {
 	fs.IntVar(&cfg.audioBitRate, "audio-bit-rate", 128_000, "Opus bit rate")
 	fs.StringVar(&cfg.outDir, "out", "out", "output directory")
 	fs.DurationVar(&cfg.duration, "duration", 10*time.Second, "capture duration")
-	fs.BoolVar(&cfg.noAudio, "no-audio", false, "capture video only")
+	fs.BoolVar(&cfg.noAudio, "no-audio", false, "disable audio")
+	fs.IntVar(&cfg.port, "port", 8080, "HTTP port, bound on localhost and the Tailscale addresses only")
+	fs.StringVar(&cfg.tokenFile, "token-file", filepath.Join(home, ".config", "cloudphone", "token"), "access token file")
 	_ = fs.Parse(args)
 	return cfg
 }
